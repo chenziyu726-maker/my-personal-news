@@ -1,0 +1,28 @@
+name: Global News Feishu Bot
+
+on:
+  schedule:
+    # UTC 时间 00:17 和 12:17 对应北京时间 08:17 和 20:17（错开整点排队高峰）
+    - cron: '17 0,12 * * *'
+  workflow_dispatch: # 允许在网页上手动点击按钮立即测试
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Python 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖库
+        run: pip install feedparser trafilatura requests openai
+
+      - name: 运行抓取与飞书推送脚本
+        env:
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: python main.py
