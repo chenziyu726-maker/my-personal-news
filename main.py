@@ -7,10 +7,11 @@ from openai import OpenAI
 # 1. 自动读取在 GitHub Secrets 中配置的密钥
 FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK")
 LLM_API_KEY = os.getenv("LLM_API_KEY")
-# 默认使用 DeepSeek 接口，若用硅基流动可改为 https://api.siliconflow.cn/v1
-LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1")
 
-# 2. 全球新闻 RSS 源（已加入 CNBC 头条与科技财经源，可随时自由增删）
+# 已修改为：阿里云通义千问（百炼）的 OpenAI 兼容接口地址
+LLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+# 2. 全球新闻 RSS 源（含 CNBC 头条与科技财经源）
 RSS_FEEDS = {
     "CNBC Top News": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114",
     "CNBC Tech": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19854910",
@@ -28,7 +29,7 @@ def fetch_and_summarize():
     for source, url in RSS_FEEDS.items():
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:2]:  # 源变多了，每个源取最新 2 条，避免总字数超限
+            for entry in feed.entries[:2]:  # 每个源取最新 2 条
                 downloaded = trafilatura.fetch_url(entry.link)
                 content = trafilatura.extract(downloaded) or entry.get("summary", "")
                 raw_news_list.append(
@@ -45,7 +46,7 @@ def fetch_and_summarize():
         f"{combined_text}"
     )
     response = client.chat.completions.create(
-        model="deepseek-chat",  # 若用其他平台，改成对应的模型名称即可
+        model="qwen-plus",  # 已修改为通义千问模型（也可改为 qwen-max 或 qwen-turbo）
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3
     )
