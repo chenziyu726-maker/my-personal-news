@@ -87,4 +87,5 @@ def send_to_feishu(summary_markdown):
     requests.post(FEISHU_WEBHOOK, json=payload)
 
 if __name__ == "__main__":
-    summary = fetch_
+    summary = fetch_and_summerize()
+    send_to_feishu(summary)
