@@ -8,18 +8,22 @@ from openai import OpenAI
 FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK")
 LLM_API_KEY = os.getenv("LLM_API_KEY")
 
-# 已修改为：阿里云通义千问（百炼）的 OpenAI 兼容接口地址
+# 阿里云通义千问（百炼）兼容接口地址（若使用了其他中转站请保持你刚才跑通的网址）
 LLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
-# 2. 全球新闻 RSS 源（含 CNBC 头条与科技财经源）
+# 2. 扩容版全球新闻 RSS 源（涵盖 11 个主流财经、科技、国际权威频道）
 RSS_FEEDS = {
     "CNBC Top News": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114",
     "CNBC Tech": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19854910",
     "CNBC Finance": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664",
+    "CNBC Markets": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839069",
+    "Yahoo Finance": "https://finance.yahoo.com/news/rssindex",
     "BBC World": "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "BBC Business": "https://feeds.bbci.co.uk/news/business/rss.xml",
     "TechCrunch": "https://techcrunch.com/feed/",
     "The Verge": "https://www.theverge.com/rss/index.xml",
-    "Hacker News": "https://news.ycombinator.com/rss"
+    "Ars Technica": "https://feeds.arstechnica.com/arstechnica/index",
+    "MIT Tech Review": "https://www.technologyreview.com/feed/"
 }
 
 def fetch_and_summarize():
@@ -28,12 +32,16 @@ def fetch_and_summarize():
 
     for source, url in RSS_FEEDS.items():
         try:
-            feed = feedparser.parse(url)
-            for entry in feed.entries[:2]:  # 每个源取最新 2 条
+            # 增加超时与请求头，防止部分外媒拦截导致漏抓
+            resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+            feed = feedparser.parse(resp.content)
+            # 每个源抓取最新 5 条（11个源共 55 条新闻）
+            for entry in feed.entries[:5]:
                 downloaded = trafilatura.fetch_url(entry.link)
                 content = trafilatura.extract(downloaded) or entry.get("summary", "")
+                # 正文提取长度提升至 1200 字符，保留更多细节与数据
                 raw_news_list.append(
-                    f"【来源】{source}\n【标题】{entry.title}\n【链接】{entry.link}\n【正文节选】{content[:500]}\n"
+                    f"【来源】{source}\n【标题】{entry.title}\n【链接】{entry.link}\n【正文内容】{content[:1200]}\n"
                 )
         except Exception as e:
             print(f"抓取 {source} 失败: {e}")
@@ -41,24 +49,34 @@ def fetch_and_summarize():
     combined_text = "\n---\n".join(raw_news_list)
 
     prompt = (
-        "你是一个专业的全球财经、科技与国际新闻情报官。请将以下抓取的英文实时新闻整理成中文简报。\n"
-        "要求：每条新闻用 1-2 句话精炼总结核心事实与数据，附带原链接，按【全球财经与市场】、【科技与AI前沿】、【国际动态】三个板块分类排版：\n\n"
-        f"{combined_text}"
+        "你是一位资深的全球宏观财经、科技与国际新闻主编。请将以下抓取到的英文实时新闻整理成一份详尽的深度中文情报内参。\n\n"
+        "【严格输出要求】：\n"
+        "1. 数量要求：请从素材中精选至少 20 到 25 条高价值新闻进行汇报，严禁过度删减或只挑寥寥几条！\n"
+        "2. 内容深度：每条新闻必须包含【加粗中文标题】+【80-120字的详细深度摘要】。摘要需交代清楚：背景原因、核心事件、关键财务/市场数据、涉及的公司或人物，以及潜在行业影响，切勿只写空洞的一句话。\n"
+        "3. 格式规范：每条新闻末尾附上 `[原文链接](URL)`，并标注来源媒体名称。\n"
+        "4. 分类排版：请按以下四个板块清晰分类，每个板块至少包含 5-7 条新闻：\n"
+        "   - 📈 【全球宏观与金融市场】\n"
+        "   - 🤖 【硬核科技与AI前沿】\n"
+        "   - 🏢 【商业巨头与产业动态】\n"
+        "   - 🌍 【国际政经要闻】\n\n"
+        f"待处理的新闻素材如下：\n{combined_text}"
     )
+
     response = client.chat.completions.create(
-        model="qwen-plus",  # 已修改为通义千问模型（也可改为 qwen-max 或 qwen-turbo）
+        model="qwen-plus",  # 若使用其他中转平台请保持你对应的模型名
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.3
+        temperature=0.3,
+        max_tokens=4000     # 显式放开最大输出字数限制，允许生成长篇深度报告
     )
     return response.choices[0].message.content
 
 def send_to_feishu(summary_markdown):
-    # 标题包含“新闻”二字，用于通过飞书机器人的安全关键词校验
+    # 飞书单张卡片如果文字太长，自动切分或直接展示完整富文本
     payload = {
         "msg_type": "interactive",
         "card": {
             "header": {
-                "title": {"tag": "plain_text", "content": "🌍 全球实时财经与科技新闻简报"},
+                "title": {"tag": "plain_text", "content": "🌍 全球实时财经与科技深度新闻内参"},
                 "template": "blue"
             },
             "elements": [
@@ -69,5 +87,4 @@ def send_to_feishu(summary_markdown):
     requests.post(FEISHU_WEBHOOK, json=payload)
 
 if __name__ == "__main__":
-    summary = fetch_and_summarize()
-    send_to_feishu(summary)
+    summary = fetch_
